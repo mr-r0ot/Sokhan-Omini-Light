@@ -13,7 +13,7 @@ from sokhan import Config, Omni
 
 # 1. Configure. The defaults are complete: 4-bit models on the CPU, downloaded on first run.
 config = Config()
-config.llm.model = r"C:\Users\tahag\Downloads\Sokhan-Omini-Light-main\Qwen2B"   # local test model;
+config.llm.model = r"C:\Users\username\Downloads\Sokhan-Omini-Light-main\Qwen2B"   # local test model;
                                                                                 # delete to use the default
 # config.tts.backend = "kitten"        # to change the TTS, uncomment these lines (KittenTTS, English;
 # config.tts.model = r"C:\Users\tahag\Downloads\Sokhan-Omini-Light-main\kitten_tts_mini_v0_8.onnx"  # voices.npz beside it)
