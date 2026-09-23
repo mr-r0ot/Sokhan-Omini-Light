@@ -31,7 +31,7 @@ from sokhan.audio import record  # noqa: E402
 
 
 
-LOCAL_LLM = r"C:\Users\tahag\Downloads\Sokhan-Omini-Light-main\Qwen2B"   # local test model ("" = default)
+LOCAL_LLM = r""   # local test model ("" = default)
 
 # Language: picks the STT (speech recognition) model and the greeting. "fa" = Persian specialists,
 # anything else ("en", "de", "ar", ...) = multilingual Whisper STT + a Piper voice for that language.
