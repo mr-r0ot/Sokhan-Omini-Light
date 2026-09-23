@@ -1,199 +1,282 @@
-# سخن (Sokhan)
+<div align="center">
 
-A **CPU-first, realtime, "omni-style" Persian voice engine.** Three specialized
-models — a Persian streaming-friendly STT, a small multilingual LLM, and a
-Persian TTS with voice cloning — fused into one tightly-integrated engine with
-professional VAD, barge-in, prosody sensing, tool calling and optional
-vision, so it *behaves* like a realtime omni model even though no single
-"omni" checkpoint is used.
+# Sokhan · سخن
 
+**A realtime, omni-style voice assistant built from specialist models.**
+VAD → STT → LLM → TTS, fused into one engine that listens, thinks and speaks like a single model.
+It runs 4-bit on a plain CPU, fully offline once downloaded.
+
+![python](https://img.shields.io/badge/python-3.9%2B-3776ab?style=flat-square)
+![cpu](https://img.shields.io/badge/runs%20on-CPU%20%C2%B7%20GPU%20optional-35d0ba?style=flat-square)
+![quant](https://img.shields.io/badge/default-4--bit-7c8cff?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-a78bfa?style=flat-square)
+
+</div>
+
+```python
+from sokhan import Omni
+
+omni = Omni()          # every stage has a tuned default and downloads on first run
+omni.start()
+omni.listen()          # microphone in, speakers out: just talk
+omni.run_forever()
 ```
-mic ─► VAD/endpointer ─► STT ─┐
-         │  ▲                 ├─► prosody cues ─► LLM (stream) ─► chunker ─► TTS ─► speaker
-   barge-in detector ◄────────┘                        ▲                              │
-         └──── cancel + flush ─────────────────────────┴──────────────────────────────┘
-```
 
-Everything runs on a **plain CPU** by default. GPU is a single config toggle
-(`hardware.use_gpu = True`) that auto-detects CUDA/Metal/DirectML/ROCm and
-falls back to CPU cleanly if nothing is found.
+---
 
-## Why three models, fused
+## Why specialists instead of one omni model
 
-No open, Persian-fluent, CPU-runnable "omni" (speech-to-speech) model exists
-today (see the design notes at the end). So instead of a loose pipeline of
-scripts, `sokhan` fuses three specialized, swappable models behind **one**
-event-driven engine that handles the parts that make a pipeline *feel* like a
-single realtime model: adaptive turn-taking, streaming generation all the way
-through, mid-sentence barge-in, tone-aware prompting, and tool calling.
+A single speech-to-speech model has to be huge to be good at everything at once. Sokhan pairs
+small, sharp specialists and makes the seams disappear:
 
-| Stage | Default model | Why |
+| Stage | Default | Size (4-bit) |
 |---|---|---|
-| VAD | Silero VAD (ONNX) | tiny (~2 MB), robust, runs on any CPU |
-| STT | Shenava-Rizeh (32M, Persian FastConformer-CTC) | fast + accurate Persian ASR, CPU-only |
-| LLM | Qwen3.5-4B, Q4_K_M quantized (GGUF) | small, multilingual, tool-calling, optional vision |
-| TTS | pocket-tts-farsi-v2 (ONNX path) | Persian voice cloning, fully offline, CPU |
+| **VAD** | Silero VAD | 2 MB |
+| **STT** | Shenava-Rizeh, FastConformer CTC via sherpa-onnx | 38 MB |
+| **LLM** | Qwen3.5-4B Q4_K_M via llama.cpp | ~2.7 GB |
+| **TTS** | Pocket-TTS Farsi v2, pure ONNX, streaming, **voice cloning** | ~180 MB |
 
-Every one of these is swappable — see **Configuration** below.
+The result is lighter and cheaper to run than a monolithic omni model, and each part is the best
+at its own job. Every stage is swappable from the config.
+
+## What makes it feel like one model
+
+```mermaid
+flowchart LR
+    mic((🎙️)) --> vad[VAD + endpointer]
+    vad -- first pause --> stt[STT · ~30 ms]
+    stt --> llm[LLM · streaming]
+    llm -- tokens --> chunk[chunker]
+    chunk --> g2p[TTS front-end]
+    g2p --> tts[streaming TTS · 80 ms blocks]
+    tts --> spk((🔊))
+    vad -. user talks over it .-> cut[barge-in: stop, remember what was heard]
+```
+
+- **Speculative turns.** At the first ~240 ms pause the engine transcribes the utterance and
+  starts replying *while it is still deciding whether you are done*. The audio is held back.
+  When the turn is confirmed the first words play at once. If you keep talking, the speculation
+  is discarded without a trace.
+- **Adaptive end of turn.** "…and" waits for more; "…please." does not. The silence needed
+  depends on the words (and the intonation).
+- **Streaming everywhere.** Tokens become speakable chunks, chunks become 80 ms audio blocks
+  while they are generated, and the text front-end of the next sentence runs in parallel.
+- **The LLM never re-reads the conversation.** History is kept token-exact and append-only, so
+  a turn only pre-fills the new message. Rollbacks restore saved state checkpoints, which also
+  covers hybrid models such as Qwen3.5 whose state cannot be truncated.
+- **Barge-in.** Talk over it and it stops within a few frames. The next turn tells the model
+  exactly what you heard of its unfinished answer.
+- **Prosody hints.** Pitch, energy, pace and intonation reach the LLM as a tiny `[voice: …]` note.
+
+### Measured
+
+On a 4-core laptop CPU (no GPU) with the local Qwen3.5-2B test model:
+
+| | old pipeline | **Sokhan 1.0** |
+|---|---:|---:|
+| TTS time to first audio block | 3–6 s (whole chunk first) | **~0.08 s** |
+| STT per utterance | ~20–50 ms | **~30–50 ms** |
+| LLM first token, history cached | full re-read after any edit | **~0.4 s** |
+| Startup, models cached | > 10 s (voice re-encoded every start) | **~5 s** |
+| End of speech → first spoken word | ≈ 4–8 s (estimated from the stages) | **~1.4 s** (en) · **~1.8 s** (fa) |
+
+A modern desktop CPU or any GPU brings the last row well under a second.
 
 ## Install
 
 ```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+git clone https://github.com/mr-r0ot/Sokhan-Omini-Light && cd Sokhan-Omini-Light
+python -m venv .venv && .venv\Scripts\activate        # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Linux users running `example.py` also need system Tkinter:
-`sudo apt install python3-tk` (Debian/Ubuntu) or `sudo dnf install python3-tkinter` (Fedora).
-Windows/macOS python.org installers already include it.
+Models download automatically on first use to `~/.cache/sokhan` (set `SOKHAN_HOME` to move
+them). The optional `onnx` package quantizes the speech models to 4-bit once, locally.
 
-Models are **downloaded automatically on first run** (a few GB, see the
-report at the bottom) and cached under `~/.cache/sokhan` (override with
-`SOKHAN_HOME` or `Config.cache_dir`). After that everything works fully
-offline.
-
-## Quick start
-
-```python
-from sokhan import Config, OmniEngine
-from sokhan.audio_io import LocalAudio
-
-cfg = Config()                       # sane defaults, CPU, Persian, quantized
-cfg.prompt.greeting = "سلام! چطور می‌تونم کمکتون کنم؟"
-
-engine = OmniEngine(cfg)
-engine.start(block=True)             # downloads + loads models, blocks until ready
-
-audio = LocalAudio(engine)           # microphone in, speakers out
-audio.start()
-
-engine.run_forever()                 # Ctrl+C to stop
-```
-
-Or try the ready-made desktop app:
+<details>
+<summary><b>GPU</b></summary>
 
 ```bash
-python example.py
+# NVIDIA
+CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+pip install onnxruntime-gpu
+# Apple Silicon
+CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
 ```
 
-## Ordinary use as a library (no audio hardware needed)
+Then set `config.hardware.use_gpu = True`. It is detected automatically and falls back to CPU.
+</details>
+
+## Examples
+
+| | |
+|---|---|
+| [`examples/01_simple_chat.py`](examples/01_simple_chat.py) | The smallest voice conversation: ~15 lines, webcam lines included (commented out). |
+| [`examples/02_desktop_assistant.py`](examples/02_desktop_assistant.py) | A polished desktop assistant: animated orb, streaming chat bubbles (RTL aware), 5-second voice cloning, camera, latency readout. |
+| [`examples/03_colab_demo.ipynb`](examples/03_colab_demo.ipynb) | Talk to it from Google Colab in the browser (mic, speaker, webcam, barge-in). |
+
+Or straight from the terminal:
+
+```bash
+python -m sokhan                 # voice
+python -m sokhan chat            # text
+python -m sokhan report          # hardware, plan, model sizes
+python -m sokhan --language en --llm-model path/to/model.gguf
+```
+
+## Use it as a library
 
 ```python
-from sokhan import Config, OmniEngine, Tool
+from sokhan import Config, Omni, tool
 
+@tool
 def add_item(name: str, qty: int = 1) -> str:
-    """Add a food item to the order."""
-    return f"{qty}x {name} added."
+    """Add a dish to the order.
 
-engine = OmniEngine(Config(), tools=[Tool.from_function(add_item)])
-engine.start(block=True)
-engine.on("assistant_text", lambda text: print(text, end=""))
-engine.send_text("یک پیتزا میخوام")   # or feed real mic audio via engine.feed_audio(pcm, sr)
+    name: the dish, e.g. "pizza"
+    """
+    return f"{qty} x {name} added"
+
+omni = Omni(Config(), tools=[add_item])
+omni.on("transcript",     lambda text: print("you:", text))
+omni.on("response_delta", lambda text: print(text, end=""))
+omni.start()
+
+omni.ask("two pizzas please")      # blocking text chat -> reply string
+omni.send_text("hello")            # as if spoken; the answer is spoken too
+omni.say("Your order is ready.")   # speak verbatim
+omni.interrupt()                   # stop talking now
 ```
 
-`OmniEngine` is transport-agnostic: feed it PCM from a microphone, a SIP/RTP
-call (Pipecat/LiveKit), a WebSocket, or a file — and consume `audio_out`
-events however you like (speakers, a call leg, a wav file).
+The engine is transport-agnostic. Push audio from anywhere (a SIP call, a WebSocket, a file) and
+take audio out however you like:
+
+```python
+omni.feed_audio(pcm, sr=48000)                       # any rate, int16 or float32
+omni.on("audio", lambda audio, sr: send(audio, sr))  # 24 kHz float32 blocks
+omni.on("audio_flush", stop_playback)                # the user interrupted
+```
+
+### Events
+
+| event | arguments |
+|---|---|
+| `ready` · `load_progress` | – · `stage, fraction, message` |
+| `state` | `state`: idle · listening · thinking · speaking |
+| `speech_start` · `speech_end` | – · `duration_ms` |
+| `partial_transcript` · `transcript` | `text` |
+| `response_start` · `response_delta` · `response_done` | `turn_id` · `text` · `text, interrupted` |
+| `tool_call` | `name, arguments, result` |
+| `audio` · `audio_flush` | `audio, sr` · – |
+| `interrupted` | `reason, heard` |
+| `metrics` | `latency_ms, stt_ms, llm_ttft_ms, tts_first_ms, …` |
+| `level` · `prosody` · `warning` · `error` | … |
+
+Handlers receive only the arguments they ask for, and `omni.on("*", fn)` receives everything.
 
 ## Configuration
 
-Every knob has a tuned default; override only what you need.
+Everything is a plain dataclass with a tuned default. Change only what you need:
 
 ```python
-from sokhan import Config
+cfg = Config()
 
-cfg = Config.preset("lowmem")        # "balanced" (default) | "lowmem" | "lowlatency" | "quality"
-cfg.llm.repo_id = "unsloth/Qwen3.5-9B-GGUF"   # swap the LLM
-cfg.llm.filename = "*Q4_K_M.gguf"
-cfg.stt.model = "koochik"            # bigger/more accurate STT
-cfg.tts.voice = "female_narration"   # built-in reference voice
-cfg.hardware.use_gpu = True          # opt-in GPU, auto-detected, auto-fallback to CPU
-cfg.vision.enabled = True            # allow image turns (needs a vision-capable LLM + backend)
-cfg.llm.backend = "llama_server"     # spawns llama-server: needed for vision, or a GPU build
-cfg.save("my_config.json")           # ship this to users; Config.load(path) reads it back
+# the brain: any GGUF repo on Hugging Face, or a local file
+cfg.llm.model = "unsloth/Qwen3.5-9B-GGUF"
+cfg.llm.quant = "Q4_K_M"                   # 4-bit default; "Q8_0", "BF16", ...
+cfg.llm.temperature, cfg.llm.top_p, cfg.llm.top_k, cfg.llm.min_p = 0.7, 0.8, 20, 0.0
+cfg.llm.repeat_penalty, cfg.llm.presence_penalty, cfg.llm.max_tokens = 1.0, 0.0, 220
+
+# ears
+cfg.stt.model = "csukuangfj/sherpa-onnx-whisper-small"
+cfg.stt.model_type = "whisper"             # nemo_ctc | whisper | transducer | paraformer | sense_voice
+
+# voice
+cfg.tts.voice = "me.wav"                   # ~5 s sample -> cloned (when the model can)
+cfg.tts.temperature, cfg.tts.speed = 0.3, 1.0
+
+# turn-taking
+cfg.turn.end_silence_ms = 500              # how long a finished-sounding pause must be
+cfg.turn.barge_in = True
+
+cfg.hardware.use_gpu = True
+cfg.save("assistant.json")                 # Config.load("assistant.json")
 ```
 
-Anything not overridden keeps the default the engine ships with, chosen for
-the best balance of realtime latency, accuracy and CPU/RAM use.
+**Presets:** `Config.preset("fast" | "lowmem" | "quality")`.
+**Languages:** `Config.for_language("en")` picks multilingual Whisper STT and a Piper voice for
+the language (the Qwen3.5 LLM is multilingual already). Persian keeps its specialist defaults.
+Language-specific logic (numbers → words, end-of-turn cues) lives in small packs in
+[`sokhan/lang.py`](sokhan/lang.py), so adding a language takes a few lines.
 
-### Swapping backends entirely
-
-Pass your own backend objects (or point `llm.backend` at any OpenAI-compatible
-server — vLLM, Ollama, a cloud API) — the engine only depends on the small
-`STTBackend` / `LLMBackend` / `TTSBackend` interfaces in `sokhan.stt` /
-`sokhan.llm` / `sokhan.tts`, so any conforming class works, in any project.
+### Swap any model
 
 ```python
-cfg.llm.backend = "openai"
-cfg.llm.base_url = "http://localhost:11434/v1"   # e.g. Ollama, vLLM, LM Studio
+cfg.llm.backend = "openai"                      # Ollama, vLLM, LM Studio, any cloud API
+cfg.llm.base_url = "http://localhost:11434/v1"
 cfg.llm.model_name = "qwen3.5:9b"
+
+cfg.tts.backend = "sherpa_onnx"                 # any Piper / VITS / Kokoro / Matcha voice
+cfg.tts.model = "csukuangfj/vits-piper-de_DE-thorsten-medium"
+
+cfg.stt.backend = "my_package.asr:MyASR"        # your own class, by import path
 ```
 
-## Reliability & performance defaults
+Or register your own backend (`@sokhan.register("tts", "my_tts")`), or pass instances directly:
+`Omni(cfg, stt=..., llm=..., tts=..., vad=...)`. Each interface is a single method to implement.
 
-- **Memory guard**: refuses to load (with a clear message) if free RAM can't
-  cover the configured models, instead of letting the OS thrash or the kernel
-  OOM-kill the process. Disable with `hardware.memory_guard = False`.
-- **CPU budgeting**: reserves cores for audio capture/playback so the UI and
-  microphone never starve even while the LLM is generating.
-- **Quantized by default**: 4-bit LLM. Turn off with `llm.quantized = False`
-  to use a full-precision checkpoint if you have the RAM/CPU to spare.
-- **Adaptive endpointing**: starts transcribing as soon as the user's turn
-  *looks* finished (grammar + intonation), falling back to a fixed silence
-  timeout — this is most of the perceived "realtime" feeling.
-- **Streaming everywhere**: LLM tokens are chunked into speakable phrases and
-  sent to TTS before the full reply is even generated.
-- **Barge-in**: interrupting the agent mid-sentence cancels LLM+TTS instantly
-  and keeps only what was actually spoken in the conversation history (not
-  the whole unfinished reply), so the model doesn't get confused later.
-- **Phrase cache**: fixed phrases (fillers, greetings) are cached after first
-  synthesis — effectively zero latency.
-
-## Cross-platform
-
-Pure Python + numpy/scipy + onnxruntime + llama-cpp-python + sherpa-onnx +
-sounddevice — all of which ship prebuilt wheels for Windows, macOS (Intel &
-Apple Silicon) and Linux (x86_64 & ARM64). No platform-specific code paths.
-
-## Reusing `sokhan` in another project
-
-The package has no dependency on `example.py` or any particular audio stack:
+### Voice cloning
 
 ```python
-import sokhan
-engine = sokhan.OmniEngine(sokhan.Config())
+if omni.capabilities["voice_cloning"]:          # checked against the loaded model, never assumed
+    omni.clone_voice("me.wav")                  # or: omni.clone_voice(samples, sr=24000)
 ```
 
-Drop the `sokhan/` folder into any project, or `pip install -e .` this repo,
-and use it exactly like any other library.
+A clean 3–5 s sample is enough. The cloned voice is cached, so switching back is instant.
 
-## Licensing note (important)
+### Vision
 
-The default TTS model (`mehdi-hf/pocket-tts-farsi-v2`, used via
-`nimaone/persian_tts`) is released under **CC-BY-NC-4.0** — non-commercial
-use only, inherited from its training data. If you deploy this commercially,
-either obtain a commercial license from the model's author or swap in a
-different Persian TTS backend (`cfg.tts.backend`).
-
-## Disk / RAM / CPU report
-
-Run:
-
-```bash
-python -m sokhan.report
+```python
+cfg.vision.enabled = True                       # Qwen3.5 + its mmproj file (downloaded automatically)
+from sokhan.vision import Webcam
+Webcam(omni).start()                            # every question carries a fresh frame
 ```
 
-to print your actual hardware, resource plan, and installed model sizes.
-Approximate figures with all default (quantized) settings:
+## Project layout
 
-| Component | Disk | RAM while loaded |
-|---|---:|---:|
-| VAD (Silero) | ~2 MB | ~30 MB |
-| STT (Shenava-Rizeh, 32M) | ~130 MB | ~350 MB |
-| LLM (Qwen3.5-4B, Q4_K_M) | ~2.8 GB | ~3.3 GB |
-| TTS (pocket-tts-farsi-v2, ONNX) | ~480 MB | ~700 MB |
-| **Total** | **~3.4 GB** | **~4.4 GB peak, ~3.3 GB steady** |
+```
+sokhan/
+  engine.py     the realtime orchestrator: turns, speculation, barge-in, streaming
+  vad.py        Silero/energy VAD, endpointer state machine, echo-aware barge-in
+  stt.py        sherpa-onnx recognizers (CTC, Whisper, Transducer, ...)
+  llm.py        llama.cpp (token-exact cache + checkpoints), OpenAI-compatible, llama-server
+  tts.py        streaming Pocket-TTS with cloning, sherpa-onnx voices
+  text.py       stream filter (JSON + XML tool calls), chunker, TTS cleanup
+  lang.py       language packs
+  config.py     every knob, presets, for_language()
+  models.py     resumable downloads, GGUF selection, one-time 4-bit quantization
+  colab.py      browser bridge for notebooks
+examples/       three ready-to-run examples
+tests/          engine behaviour with mock models (no downloads)
+```
 
-**Minimum to run comfortably:** 2 physical CPU cores (4+ recommended for
-sub-1.5s replies), ~4 GB free RAM, ~3.5 GB free disk, no GPU required.
-Unquantized LLM roughly triples LLM disk/RAM (~8-9 GB total).
+Run the tests with `pytest`.
+
+## Notes
+
+- **Tool calling** works with any backend through the model's own chat template. Small models
+  (2B) sometimes answer without calling the tool; 4B and up are far more reliable.
+- **License of the default voice:** Pocket-TTS Farsi v2 is **CC-BY-NC-4.0** (non-commercial).
+  For commercial use, pick another TTS backend or license the model.
+- **Echo:** barge-in learns the speaker-to-mic echo path. On loud open speakers without echo
+  cancellation, headphones or `cfg.turn.half_duplex = True` give the cleanest results. (The
+  browser in Colab cancels echo on its own.)
+
+### for example you can use KittenTTS for english TTS engine
+https://github.com/KittenML/KittenTTS
+
+### the defult TTS persian engine don't perfect 
+
+### if going something worng with models just change to a better option
+
+<div align="center"><sub>MIT licensed · built for people who want an assistant that simply talks.</sub></div>

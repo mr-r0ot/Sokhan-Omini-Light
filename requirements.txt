@@ -1,45 +1,19 @@
-# Core (always required)
+# Core - everything the default setup needs
 numpy>=1.24
 scipy>=1.10
+onnxruntime>=1.17          # VAD, TTS (and GPU: onnxruntime-gpu)
+sherpa-onnx>=1.10          # speech recognition (and optional Piper/Kokoro voices)
+llama-cpp-python>=0.3.16   # the language model (GPU: see README)
+sentencepiece>=0.2.0       # TTS phoneme tokenizer
+soundfile>=0.12            # reading voice samples
+sounddevice>=0.4.6         # microphone + speakers
+psutil>=5.9                # hardware planning
 
-# Speech-to-text (Shenava, Persian FastConformer-CTC via sherpa-onnx)
-sherpa-onnx>=1.10
+# Recommended
+onnx>=1.15                 # one-time 4-bit quantization of the speech models (falls back to fp32 without it)
 
-# LLM (Qwen3.5-4B, in-process, CPU by default; add CUDA/Metal wheels for GPU)
-llama-cpp-python>=0.3.0
-
-# TTS (pocket-tts-farsi-v2, pure ONNX path — no torch needed)
-onnxruntime>=1.17
-soundfile>=0.12
-sentencepiece>=0.2.0
-
-# Model downloads (resumable, faster than plain HTTP)
-huggingface_hub>=0.24
-
-# Microphone / speaker I/O for LocalAudio and example.py
-sounddevice>=0.4.6
-
-# System info for hardware planning / memory guard
-psutil>=5.9
-
-# Optional: only needed if you attach images (vision) via the Python API
-pillow>=10.0
-
-# Optional: only needed for Config.load()/save() with YAML files
-pyyaml>=6.0
-
-# --- Notes -------------------------------------------------------------
-# * example.py additionally needs Tkinter, which ships with the standard
-#   CPython installer on Windows/macOS. On Debian/Ubuntu Linux install it
-#   with:  sudo apt install python3-tk
-#   On Fedora:  sudo dnf install python3-tkinter
-#
-# * example_colab.py needs ipywidgets (preinstalled on Google Colab) instead
-#   of Tkinter; no extra install needed there.
-#
-# * For GPU acceleration, replace the plain wheels above:
-#     - llama-cpp-python: install a CUDA/Metal/Vulkan build, e.g.
-#         CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
-#     - onnxruntime: pip install onnxruntime-gpu   (NVIDIA/CUDA)
-#   sokhan detects whichever is installed automatically when
-#   config.hardware.use_gpu = True.
+# Optional
+# pillow>=10.0             # images / vision
+# opencv-python>=4.8       # webcam
+# num2words>=0.5           # speak numbers in languages without a built-in pack
+# pyyaml>=6.0              # YAML configs

@@ -4,29 +4,43 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sokhan"
-version = "0.1.0"
-description = "CPU-first, realtime, omni-style Persian voice engine (STT+LLM+TTS fused, VAD, barge-in, prosody)"
+version = "1.0.0"
+description = "Realtime omni-style voice assistant from specialist models (VAD + STT + LLM + TTS), 4-bit, CPU-first"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
+keywords = ["voice assistant", "speech", "realtime", "llm", "tts", "stt", "vad", "llama.cpp", "offline"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
+    "onnxruntime>=1.17",
+    "sherpa-onnx>=1.10",
+    "llama-cpp-python>=0.3.16",
+    "sentencepiece>=0.2.0",
+    "soundfile>=0.12",
+    "sounddevice>=0.4.6",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
-stt = ["sherpa-onnx>=1.10"]
-llm = ["llama-cpp-python>=0.3.0"]
-tts = ["onnxruntime>=1.17", "soundfile>=0.12", "sentencepiece>=0.2.0"]
-audio = ["sounddevice>=0.4.6"]
-vision = ["pillow>=10.0"]
-download = ["huggingface_hub>=0.24"]
-yaml = ["pyyaml>=6.0"]
-full = [
-    "sherpa-onnx>=1.10", "llama-cpp-python>=0.3.0", "onnxruntime>=1.17",
-    "soundfile>=0.12", "sentencepiece>=0.2.0", "sounddevice>=0.4.6",
-    "pillow>=10.0", "huggingface_hub>=0.24", "pyyaml>=6.0", "psutil>=5.9",
-]
+quant = ["onnx>=1.15"]                      # one-time local 4-bit quantization of the ONNX models
+vision = ["pillow>=10.0", "opencv-python>=4.8"]
+extras = ["num2words>=0.5", "pyyaml>=6.0", "huggingface_hub>=0.24"]
+full = ["onnx>=1.15", "pillow>=10.0", "opencv-python>=4.8", "num2words>=0.5", "pyyaml>=6.0",
+        "huggingface_hub>=0.24"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+sokhan = "sokhan.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["sokhan*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
