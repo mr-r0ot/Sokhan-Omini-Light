@@ -39,6 +39,9 @@ small, sharp specialists and makes the seams disappear:
 The result is lighter and cheaper to run than a monolithic omni model, and each part is the best
 at its own job. Every stage is swappable from the config.
 
+
+![https://github.com/mr-r0ot/Sokhan-Omini-Light/blob/main/examples/02_desktop_assistant.py](example_ass_project.png)
+
 ## What makes it feel like one model
 
 ```mermaid
